@@ -197,10 +197,8 @@ private fun SensorCard(sensor: SensorRecord?, now: Long) {
                 formatSensorDay(ageMinutes, sensor.maxLifeMinutes),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            val remaining = (sensor.maxLifeMinutes - ageMinutes).coerceAtLeast(0)
             Text(
-                if (remaining == 0) "Expired — time to replace it"
-                else "About ${remaining / (24 * 60)} days ${remaining % (24 * 60) / 60} hours left",
+                formatSensorRemaining(ageMinutes, sensor.maxLifeMinutes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
