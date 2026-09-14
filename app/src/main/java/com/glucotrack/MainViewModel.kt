@@ -181,18 +181,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 )
                 _scanStatus.value = ScanStatus.Idle
-                StreamingService.start(getApplication())
+                StreamingService.start(getApplication<Application>())
             }
         }
     }
 
     fun stopStreaming() {
-        StreamingService.stop(getApplication())
+        StreamingService.stop(getApplication<Application>())
         viewModelScope.launch { streamingStore.clear() }
     }
 
     fun restartStreaming() {
-        StreamingService.start(getApplication())
+        StreamingService.start(getApplication<Application>())
     }
 
     fun armActivation() {

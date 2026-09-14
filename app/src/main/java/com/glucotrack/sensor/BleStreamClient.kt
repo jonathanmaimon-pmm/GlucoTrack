@@ -25,7 +25,7 @@ sealed interface StreamState {
  *
  * The sensor only talks to one connected device, and only after being handed an unlock payload
  * derived from the code it was given over NFC. Each connection must present a payload with a
- * fresh session counter, so [nextUnlockCount] is called once per connection attempt.
+ * fresh session counter, which the caller takes from storage before calling [connect].
  *
  * Nothing here is required for the app to work: NFC scanning is unaffected whether streaming is
  * running, broken, or never set up. That is deliberate — a flaky Bluetooth stack should never
@@ -34,7 +34,6 @@ sealed interface StreamState {
 @SuppressLint("MissingPermission") // Callers check BLUETOOTH_CONNECT; see StreamingService.
 class BleStreamClient(
     private val context: Context,
-    private val nextUnlockCount: suspend () -> Int,
     private val onReading: (ByteArray) -> Unit,
     private val onState: (StreamState) -> Unit,
 ) {
@@ -162,8 +161,8 @@ class BleStreamClient(
             if (characteristic.uuid == DATA_UUID) accumulate(value)
         }
 
-        @Deprecated("Superseded on API 33; still delivered on older releases.")
-        @Suppress("DEPRECATION")
+        // Superseded by the value-carrying overload on API 33; still delivered below it.
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onCharacteristicChanged(
             g: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,

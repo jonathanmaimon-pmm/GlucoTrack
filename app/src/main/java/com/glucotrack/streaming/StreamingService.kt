@@ -93,7 +93,6 @@ class StreamingService : Service() {
 
             client = BleStreamClient(
                 context = this@StreamingService,
-                nextUnlockCount = { store.nextUnlockCount() },
                 onReading = { packet -> handlePacket(packet, session.uid, calibration, sensor.serial) },
                 onState = { state ->
                     _state.value = state

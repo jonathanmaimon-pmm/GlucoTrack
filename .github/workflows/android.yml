@@ -34,18 +34,6 @@ jobs:
           set -o pipefail
           ./gradlew assembleDebug --console=plain 2>&1 | tee -a build.log
 
-      # Gradle buries compiler errors above a long stack trace. Repeating them last means the
-      # actual problem is visible at the end of the log rather than hundreds of lines up.
-      - name: Compiler errors
-        if: failure()
-        run: |
-          echo "::group::Kotlin and Java errors"
-          grep -E "^(e:|error:)" build.log || echo "(no compiler errors — likely a failing test)"
-          echo "::endgroup::"
-          echo "::group::Failed tests"
-          grep -E "FAILED|AssertionError|expected:" build.log | head -50 || true
-          echo "::endgroup::"
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -89,3 +77,15 @@ jobs:
             --prerelease \
             --target "$GITHUB_SHA" \
             --notes-file notes.md
+
+      # Gradle buries compiler errors above a long stack trace. Repeating them last means the
+      # actual problem is visible at the end of the log rather than hundreds of lines up.
+      - name: Compiler errors
+        if: failure()
+        run: |
+          echo "::group::Kotlin and Java errors"
+          grep -E "^(e:|error:)" build.log || echo "(no compiler errors — likely a failing test)"
+          echo "::endgroup::"
+          echo "::group::Failed tests"
+          grep -E "FAILED|AssertionError|expected:" build.log | head -50 || true
+          echo "::endgroup::"
