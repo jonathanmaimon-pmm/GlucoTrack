@@ -228,9 +228,6 @@ private fun TargetField(label: String, value: Double, onChange: (Double) -> Unit
 @Composable
 private fun SharingCard(
     status: TransferStatus,
-    onArmStreaming: () -> Unit,
-    onCancelStreaming: () -> Unit,
-    onStopStreaming: () -> Unit,
     onExport: ((String) -> Unit) -> Unit,
     onImport: (String) -> Unit,
     onDismiss: () -> Unit,
