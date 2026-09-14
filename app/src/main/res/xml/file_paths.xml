@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Exports are written to a cache subdirectory, not to shared storage: the file exists
+         only long enough to be handed to whichever app the user picks. -->
+    <cache-path name="exports" path="exports/" />
+</paths>

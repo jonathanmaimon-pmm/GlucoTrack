@@ -67,6 +67,9 @@ interface SensorDao {
     @Query("SELECT * FROM sensors ORDER BY lastScanAt DESC LIMIT 1")
     fun mostRecent(): Flow<SensorRecord?>
 
+    @Query("SELECT * FROM sensors ORDER BY lastScanAt DESC")
+    suspend fun allOnce(): List<SensorRecord>
+
     @Query("DELETE FROM sensors")
     suspend fun deleteAll()
 }

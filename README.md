@@ -80,6 +80,32 @@ The sensor in hand is unstarted, so the order is:
 readings between scans are recovered from that buffer. Longer gaps are lost permanently —
 the chart will show a break rather than a guess.
 
+## Using it on two phones
+
+Installing on both partners' phones works, with one caveat and one limitation.
+
+**Scanning from both phones is safe.** Reading the sensor over NFC is read-only — the tag holds
+no reader identity and nothing is consumed. Tap it from either phone, as often as you like, in
+any order.
+
+**Each phone only has what it scanned.** Nothing syncs, because the app has no network access.
+If one of you scans in the morning and the other in the evening, neither phone holds the full
+record — and each will compute statistics over its own partial coverage. Every summary states
+how many hours it actually covers, so watch that number.
+
+To reconcile them, use **Settings → Sharing between phones**: export from one, send the file over
+however you like, import on the other. Importing only ever adds, and importing the same file
+twice does nothing, because readings are identified by sensor serial plus the sensor's own clock
+rather than by anything device-specific.
+
+The practical advice: **let one phone be the main one** — whoever is wearing the sensor is the
+obvious choice, since it's always to hand — and use export/import when the other person wants the
+full picture.
+
+**Bluetooth streaming, when it lands, will be single-device.** The sensor accepts one connection
+at a time, and enabling streaming assigns a fresh unlock code, which invalidates whichever phone
+enabled it previously. Only one phone can stream; the other can still scan over NFC.
+
 ## How it works
 
 A Libre 2 is a passive NFC tag (ISO 15693) with 344 bytes of memory holding a 16-entry

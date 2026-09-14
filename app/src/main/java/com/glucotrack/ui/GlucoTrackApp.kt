@@ -45,6 +45,7 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
     val scanStatus by viewModel.scanStatus.collectAsStateWithLifecycle()
     val armed by viewModel.armedToActivate.collectAsStateWithLifecycle()
     val now by viewModel.clock.collectAsStateWithLifecycle()
+    val transferStatus by viewModel.transferStatus.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("GlucoTrack") }) },
@@ -109,8 +110,12 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
                 unit = settings.unit,
                 targets = settings.targets,
                 readingCount = all.size,
+                transferStatus = transferStatus,
                 onUnitChange = viewModel::setUnit,
                 onTargetsChange = viewModel::setTargets,
+                onExport = viewModel::export,
+                onImport = viewModel::import,
+                onDismissTransfer = viewModel::dismissTransferStatus,
                 onDeleteEverything = viewModel::deleteEverything,
                 modifier = content,
             )

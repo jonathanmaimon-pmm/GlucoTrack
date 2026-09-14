@@ -74,6 +74,57 @@ class GlucoTrackRepository(private val db: GlucoTrackDatabase) {
         )
     }
 
+    /** Everything this phone holds, for handing to the other phone. */
+    suspend fun snapshot(): Transfer.Snapshot = Transfer.Snapshot(
+        readings = db.glucoseDao().readingsBetweenOnce(0L, Long.MAX_VALUE),
+        meals = db.nutritionDao().allEntriesOnce(),
+        sensors = db.sensorDao().allOnce(),
+    )
+
+    /**
+     * Merges an export from another phone into this one.
+     *
+     * Additive only: nothing already here is removed, and re-importing the same file changes
+     * nothing. Readings collapse on their natural key, so a measurement both phones captured is
+     * stored once. Meals are matched on when they were eaten and what they were, because row ids
+     * are assigned per device and cannot identify the same meal across two installations.
+     */
+    suspend fun merge(snapshot: Transfer.Snapshot): Transfer.MergeSummary {
+        val existingReadings = db.glucoseDao().readingsBetweenOnce(0L, Long.MAX_VALUE)
+            .map { it.sensorSerial to it.minutesSinceStart }
+            .toHashSet()
+        val newReadings = snapshot.readings
+            .filter { (it.sensorSerial to it.minutesSinceStart) !in existingReadings }
+        if (newReadings.isNotEmpty()) db.glucoseDao().insertAll(newReadings)
+
+        val existingMeals = db.nutritionDao().allEntriesOnce()
+            .map { Transfer.mealKey(it) }
+            .toHashSet()
+        val newMeals = snapshot.meals.filter { Transfer.mealKey(it) !in existingMeals }
+        newMeals.forEach { db.nutritionDao().upsert(it.copy(id = 0)) }
+
+        val existingSensors = db.sensorDao().allOnce().associateBy { it.serial }
+        var sensorsAdded = 0
+        snapshot.sensors.forEach { incoming ->
+            val current = existingSensors[incoming.serial]
+            if (current == null) {
+                db.sensorDao().upsert(incoming)
+                sensorsAdded++
+            } else if (incoming.lastScanAt > current.lastScanAt) {
+                // Keep whichever phone scanned it most recently.
+                db.sensorDao().upsert(incoming)
+            }
+        }
+
+        return Transfer.MergeSummary(
+            readingsAdded = newReadings.size,
+            readingsAlreadyPresent = snapshot.readings.size - newReadings.size,
+            mealsAdded = newMeals.size,
+            mealsAlreadyPresent = snapshot.meals.size - newMeals.size,
+            sensorsAdded = sensorsAdded,
+        )
+    }
+
     /** Wipes everything on the device. Used by the "delete all data" action in Settings. */
     suspend fun deleteEverything() {
         db.glucoseDao().deleteAllReadings()

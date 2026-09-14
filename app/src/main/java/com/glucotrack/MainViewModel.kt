@@ -13,6 +13,7 @@ import com.glucotrack.data.GlucoseReading
 import com.glucotrack.data.NutritionEntry
 import com.glucotrack.data.SensorRecord
 import com.glucotrack.data.SettingsStore
+import com.glucotrack.data.Transfer
 import com.glucotrack.sensor.NfcSensorReader
 import com.glucotrack.sensor.ScanResult
 import com.glucotrack.sensor.SensorScan
@@ -29,6 +30,15 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Outcome of an export or import, so the user is told what actually happened. */
+sealed interface TransferStatus {
+    data object Idle : TransferStatus
+    data object Working : TransferStatus
+    data class Exported(val readings: Int, val meals: Int) : TransferStatus
+    data class Imported(val summary: Transfer.MergeSummary) : TransferStatus
+    data class Failed(val message: String) : TransferStatus
+}
 
 /** Progress of an NFC tap, surfaced so the UI can say what is happening. */
 sealed interface ScanStatus {
@@ -156,6 +166,53 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteMeal(id: Long) {
         viewModelScope.launch { repository.deleteNutritionEntry(id) }
+    }
+
+    private val _transferStatus = MutableStateFlow<TransferStatus>(TransferStatus.Idle)
+    val transferStatus: StateFlow<TransferStatus> = _transferStatus.asStateFlow()
+
+    /**
+     * Builds the export text and hands it back for the UI to write and share.
+     *
+     * File writing stays in the UI layer because it needs a Context; the view model only owns
+     * the data.
+     */
+    fun export(onReady: (String) -> Unit) {
+        viewModelScope.launch {
+            _transferStatus.value = TransferStatus.Working
+            runCatching {
+                val snapshot = repository.snapshot()
+                val text = Transfer.export(snapshot, System.currentTimeMillis())
+                _transferStatus.value =
+                    TransferStatus.Exported(snapshot.readings.size, snapshot.meals.size)
+                text
+            }.onSuccess(onReady).onFailure {
+                _transferStatus.value = TransferStatus.Failed(
+                    it.message ?: "Couldn't build the export file."
+                )
+            }
+        }
+    }
+
+    /** Merges an export from the other phone. Additive, and safe to repeat. */
+    fun import(text: String) {
+        viewModelScope.launch {
+            _transferStatus.value = TransferStatus.Working
+            runCatching { repository.merge(Transfer.parse(text)) }
+                .onSuccess {
+                    refresh.value = System.currentTimeMillis()
+                    _transferStatus.value = TransferStatus.Imported(it)
+                }
+                .onFailure { e ->
+                    _transferStatus.value = TransferStatus.Failed(
+                        e.message ?: "That file couldn't be read."
+                    )
+                }
+        }
+    }
+
+    fun dismissTransferStatus() {
+        _transferStatus.value = TransferStatus.Idle
     }
 
     fun setUnit(unit: GlucoseUnit) {
