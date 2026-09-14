@@ -49,14 +49,18 @@ your clinician's numbers beat any default shipped in an app.
 
 ## Installing
 
-No Android Studio needed. Every push builds an installable APK in CI:
+No Android Studio needed. Every push builds a signed APK and publishes it here:
 
-1. Open the [Actions](../../actions) tab and click the most recent **Build APK** run.
-2. Download the `glucotrack-debug-apk` artifact and unzip it.
-3. Copy the APK to the phone and open it. Android will ask you to allow installing from
-   this source — that's expected for an app not from the Play Store.
+**→ [Download the latest build](../../releases/tag/dev)**
+
+Open that page on the phone, download `glucotrack.apk`, and tap it. Android will ask you
+to allow installing from this source — expected for an app that isn't from the Play Store.
 
 Requires an Android phone with NFC, running Android 8.0 or newer.
+
+New builds install straight over old ones and keep their stored readings, because the debug
+signing key is fixed in the repository rather than regenerated per build. That key signs debug
+builds only and is not a secret; it must never be used to sign anything for distribution.
 
 ## First run
 

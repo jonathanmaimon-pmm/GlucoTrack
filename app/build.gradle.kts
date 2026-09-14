@@ -18,7 +18,32 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        /*
+         * A fixed debug signing key, committed to the repository.
+         *
+         * Normally Gradle generates a debug keystore on whatever machine is building, which means
+         * every CI run signs with a different key. Android refuses to install an update signed by
+         * a different key than the installed app, so the only way to take a new build would be to
+         * uninstall first -- and uninstalling deletes the glucose database. Pinning the key lets
+         * builds install straight over each other and keep their readings.
+         *
+         * This key carries no security value: it signs debug builds only, its password is the
+         * Android convention, and it is in the repository by design. It must never be used to
+         * sign anything for distribution.
+         */
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

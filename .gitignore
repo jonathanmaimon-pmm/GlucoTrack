@@ -9,3 +9,5 @@ captures/
 .cxx
 *.apk
 *.keystore
+# Exception: a debug-only signing key, deliberately committed. See app/build.gradle.kts.
+!app/debug.keystore

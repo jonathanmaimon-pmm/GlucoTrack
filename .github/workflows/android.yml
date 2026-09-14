@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -57,3 +60,32 @@ jobs:
           name: test-report
           path: app/build/reports/
           if-no-files-found: ignore
+
+      # A CI artifact is a zip behind a login, which is awkward to install from a phone.
+      # A rolling pre-release gives one stable URL that downloads the .apk directly.
+      - name: Publish rolling dev build
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk glucotrack.apk
+          # Written to a file so the notes are not indented into a Markdown code block.
+          cat > notes.md <<'NOTES'
+          Automatic build. Download **glucotrack.apk** below and open it on the phone.
+
+          Builds are signed with a fixed debug key, so a new one installs over the old
+          one and keeps its stored readings.
+
+          Not yet tested against a real sensor. See the README before relying on any
+          reading it shows.
+          NOTES
+          sed -i 's/^          //' notes.md
+          echo "" >> notes.md
+          echo "Built from commit \`$GITHUB_SHA\`." >> notes.md
+
+          gh release delete dev --yes --cleanup-tag || true
+          gh release create dev glucotrack.apk \
+            --title "GlucoTrack - latest build" \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --notes-file notes.md
