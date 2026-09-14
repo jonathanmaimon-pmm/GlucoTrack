@@ -38,6 +38,7 @@ import com.glucotrack.analysis.GlucoseUnit
 import com.glucotrack.TransferStatus
 import com.glucotrack.data.StreamingSession
 import com.glucotrack.sensor.StreamState
+import com.glucotrack.sensor.SensorScan
 import androidx.compose.material3.Button
 import androidx.core.content.FileProvider
 import java.io.File
@@ -52,6 +53,7 @@ fun SettingsScreen(
     streamState: StreamState,
     lastStreamedAt: Long?,
     armedToEnableStreaming: Boolean,
+    lastScan: SensorScan?,
     now: Long,
     onUnitChange: (GlucoseUnit) -> Unit,
     onTargetsChange: (GlucoseTargets) -> Unit,
@@ -102,6 +104,8 @@ fun SettingsScreen(
         )
 
         SharingCard(transferStatus, onExport, onImport, onDismissTransfer)
+
+        DiagnosticsCard(lastScan)
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -459,6 +463,74 @@ private fun StreamingCard(
 
             Spacer(Modifier.height(12.dp))
             OutlinedButton(onStop) { Text("Turn off streaming") }
+        }
+    }
+}
+
+
+/**
+ * The raw numbers behind the most recent reading.
+ *
+ * A glucose value can look entirely reasonable and still be wrong, and without a meter to check
+ * it against there is no way to tell from the number alone. This exposes the inputs — the sensor's
+ * factory calibration and the raw counts a reading was computed from — so the arithmetic can be
+ * verified independently instead of trusted.
+ *
+ * Only populated after a scan in this session, since it is deliberately not stored.
+ */
+@Composable
+private fun DiagnosticsCard(scan: SensorScan?) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Sensor diagnostics", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+
+            if (scan == null) {
+                Text(
+                    "Scan the sensor to see the raw values behind a reading.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                return@Column
+            }
+
+            val cal = scan.calibration
+            val lines = buildList {
+                add("serial: ${scan.serial}")
+                add("state: ${scan.state}  family: ${scan.family}")
+                add("age: ${scan.ageMinutes} min   max life: ${scan.maxLifeMinutes} min")
+                add("calibration i1..i6: ${cal.i1}, ${cal.i2}, ${cal.i3}, ${cal.i4}, ${cal.i5}, ${cal.i6}")
+                add("")
+                add("trend, newest first (raw / temp / adj -> mg/dL):")
+                scan.trend.take(8).forEach {
+                    add(
+                        "  ${it.minutesSinceStart}: ${it.rawValue} / ${it.rawTemperature} / " +
+                            "${it.temperatureAdjustment} -> ${it.mgdl?.toInt() ?: "-"}" +
+                            if (it.hasError) "  ERR(${it.dataQuality})" else ""
+                    )
+                }
+                add("")
+                add("history, newest first:")
+                scan.history.take(4).forEach {
+                    add(
+                        "  ${it.minutesSinceStart}: ${it.rawValue} / ${it.rawTemperature} / " +
+                            "${it.temperatureAdjustment} -> ${it.mgdl?.toInt() ?: "-"}"
+                    )
+                }
+            }
+
+            Text(
+                lines.joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "If a reading looks wrong, a photo of this is enough to check the calculation.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

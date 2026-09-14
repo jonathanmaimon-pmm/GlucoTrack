@@ -78,6 +78,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * Starting a sensor is irreversible — it begins the 14-day clock — so it never happens as a
      * side effect of a tap. The user has to arm it deliberately, and it disarms after one tap.
      */
+    /**
+     * The last successfully decoded scan, kept for the diagnostics view.
+     *
+     * Held in memory only. Its purpose is to expose the raw sensor numbers behind a reading so a
+     * suspicious value can be checked against the calibration by hand, rather than taken on
+     * trust.
+     */
+    private val _lastScan = MutableStateFlow<SensorScan?>(null)
+    val lastScan: StateFlow<SensorScan?> = _lastScan.asStateFlow()
+
     private val _armedToActivate = MutableStateFlow(false)
     val armedToActivate: StateFlow<Boolean> = _armedToActivate.asStateFlow()
 
@@ -144,6 +154,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _scanStatus.value = when (result) {
                 is ScanResult.Failure -> ScanStatus.Error(result.reason)
                 is ScanResult.Success -> {
+                    _lastScan.value = result.scan
                     repository.saveScan(result.scan)
                     refresh.value = System.currentTimeMillis()
                     ScanStatus.Success(result.scan, System.currentTimeMillis())
