@@ -21,7 +21,6 @@ class NfcSensorReader {
 
         return try {
             nfcv.connect()
-            nfcv.timeout = TRANSCEIVE_TIMEOUT_MS
             val uid = tag.id
             if (uid.size != 8) {
                 return ScanResult.Failure("Unexpected tag ID length (${uid.size}).")
@@ -68,7 +67,6 @@ class NfcSensorReader {
         val nfcv = NfcV.get(tag) ?: return ScanResult.Failure("That tag isn't a Libre sensor.")
         return try {
             nfcv.connect()
-            nfcv.timeout = TRANSCEIVE_TIMEOUT_MS
             val uid = tag.id
             if (uid.size != 8) return ScanResult.Failure("Unexpected tag ID length (${uid.size}).")
 
@@ -161,7 +159,13 @@ class NfcSensorReader {
         const val CMD_ACTIVATE = 0x1B
 
         const val BLOCKS_PER_READ = 3
-        const val TRANSCEIVE_TIMEOUT_MS = 2000
+
+        /**
+         * How long to keep retrying a single exchange before giving up.
+         *
+         * NfcV exposes no per-transceive timeout the way IsoDep and NfcA do, so this window is
+         * the only bound on how long a wobbly tap keeps trying.
+         */
         const val RETRY_WINDOW_MS = 2000L
         const val RETRY_PAUSE_MS = 50L
     }
