@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!--
       NFC is the only permission this app holds.
@@ -9,6 +10,39 @@
       Adding any networking later would mean adding a permission here, which is a visible change.
     -->
     <uses-permission android:name="android.permission.NFC" />
+
+    <!--
+      Bluetooth, for receiving the reading the sensor broadcasts each minute. Still no INTERNET
+      permission: these reach the sensor on the wrist, not the network.
+    -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:targetApi="s" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <!-- Pre-12 devices gate Bluetooth behind the old permissions instead. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
+    <!-- Android kills a background process holding a GATT connection; collecting readings
+         unattended requires a foreground service and its ongoing notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"
+        tools:targetApi="34" />
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS"
+        tools:targetApi="33" />
+
+    <uses-feature
+        android:name="android.hardware.bluetooth_le"
+        android:required="false" />
     <uses-feature
         android:name="android.hardware.nfc"
         android:required="true" />
@@ -33,6 +67,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".streaming.StreamingService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <!--
           Lets an export be shared with another app by content URI. Grants are per-file and

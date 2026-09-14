@@ -46,6 +46,10 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
     val armed by viewModel.armedToActivate.collectAsStateWithLifecycle()
     val now by viewModel.clock.collectAsStateWithLifecycle()
     val transferStatus by viewModel.transferStatus.collectAsStateWithLifecycle()
+    val streamingSession by viewModel.streamingSession.collectAsStateWithLifecycle()
+    val streamState by viewModel.streamState.collectAsStateWithLifecycle()
+    val lastStreamedAt by viewModel.lastStreamedAt.collectAsStateWithLifecycle()
+    val armedStreaming by viewModel.armedToEnableStreaming.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("GlucoTrack") }) },
@@ -111,8 +115,16 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
                 targets = settings.targets,
                 readingCount = all.size,
                 transferStatus = transferStatus,
+                streamingSession = streamingSession,
+                streamState = streamState,
+                lastStreamedAt = lastStreamedAt,
+                armedToEnableStreaming = armedStreaming,
+                now = now,
                 onUnitChange = viewModel::setUnit,
                 onTargetsChange = viewModel::setTargets,
+                onArmStreaming = viewModel::armStreamingEnable,
+                onCancelStreaming = viewModel::cancelStreamingEnable,
+                onStopStreaming = viewModel::stopStreaming,
                 onExport = viewModel::export,
                 onImport = viewModel::import,
                 onDismissTransfer = viewModel::dismissTransferStatus,

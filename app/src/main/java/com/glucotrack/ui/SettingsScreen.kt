@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.Manifest
 import android.content.Intent
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
@@ -34,6 +36,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import com.glucotrack.analysis.GlucoseTargets
 import com.glucotrack.analysis.GlucoseUnit
 import com.glucotrack.TransferStatus
+import com.glucotrack.data.StreamingSession
+import com.glucotrack.sensor.StreamState
+import androidx.compose.material3.Button
 import androidx.core.content.FileProvider
 import java.io.File
 
@@ -43,8 +48,16 @@ fun SettingsScreen(
     targets: GlucoseTargets,
     readingCount: Int,
     transferStatus: TransferStatus,
+    streamingSession: StreamingSession?,
+    streamState: StreamState,
+    lastStreamedAt: Long?,
+    armedToEnableStreaming: Boolean,
+    now: Long,
     onUnitChange: (GlucoseUnit) -> Unit,
     onTargetsChange: (GlucoseTargets) -> Unit,
+    onArmStreaming: () -> Unit,
+    onCancelStreaming: () -> Unit,
+    onStopStreaming: () -> Unit,
     onExport: ((String) -> Unit) -> Unit,
     onImport: (String) -> Unit,
     onDismissTransfer: () -> Unit,
@@ -76,6 +89,17 @@ fun SettingsScreen(
         }
 
         TargetsCard(targets, onTargetsChange)
+
+        StreamingCard(
+            session = streamingSession,
+            state = streamState,
+            lastStreamedAt = lastStreamedAt,
+            armed = armedToEnableStreaming,
+            now = now,
+            onArm = onArmStreaming,
+            onCancel = onCancelStreaming,
+            onStop = onStopStreaming,
+        )
 
         SharingCard(transferStatus, onExport, onImport, onDismissTransfer)
 
@@ -204,6 +228,9 @@ private fun TargetField(label: String, value: Double, onChange: (Double) -> Unit
 @Composable
 private fun SharingCard(
     status: TransferStatus,
+    onArmStreaming: () -> Unit,
+    onCancelStreaming: () -> Unit,
+    onStopStreaming: () -> Unit,
     onExport: ((String) -> Unit) -> Unit,
     onImport: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -301,6 +328,140 @@ private fun SharingCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+}
+
+
+/**
+ * Continuous readings over Bluetooth.
+ *
+ * Streaming is additive: NFC scanning works identically whether this is on, off, or broken, so a
+ * Bluetooth problem can never cost a reading that a tap would have caught.
+ *
+ * Only one phone can stream. The sensor accepts a single connection and enabling streaming
+ * assigns a fresh unlock code, so switching it on here stops it working anywhere else.
+ */
+@Composable
+private fun StreamingCard(
+    session: StreamingSession?,
+    state: StreamState,
+    lastStreamedAt: Long?,
+    armed: Boolean,
+    now: Long,
+    onArm: () -> Unit,
+    onCancel: () -> Unit,
+    onStop: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("Continuous readings", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(4.dp))
+
+            if (session == null) {
+                Text(
+                    "The sensor can broadcast a reading every minute over Bluetooth, which " +
+                        "removes the tapping and the eight-hour limit on filling in history. " +
+                        "Turning it on takes one NFC scan.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Only one phone can stream from a sensor. Set this up on the phone that " +
+                        "stays with the sensor; the other can still scan over NFC.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                if (armed) {
+                    Text(
+                        "Hold the phone against the sensor now.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onCancel) { Text("Cancel") }
+                } else {
+                    var denied by remember { mutableStateOf(false) }
+
+                    // Bluetooth and the ongoing notification are both runtime permissions on
+                    // recent Android. Without them the service starts and immediately dies, so
+                    // they are asked for before arming rather than after.
+                    val needed = remember {
+                        buildList {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                add(Manifest.permission.BLUETOOTH_CONNECT)
+                                add(Manifest.permission.BLUETOOTH_SCAN)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                add(Manifest.permission.POST_NOTIFICATIONS)
+                            }
+                        }
+                    }
+                    val permissionLauncher = rememberLauncherForActivityResult(
+                        ActivityResultContracts.RequestMultiplePermissions()
+                    ) { result ->
+                        // Notifications being refused is survivable; Bluetooth is not.
+                        val bluetoothOk = result
+                            .filterKeys { it != Manifest.permission.POST_NOTIFICATIONS }
+                            .all { it.value }
+                        if (bluetoothOk) {
+                            denied = false
+                            onArm()
+                        } else {
+                            denied = true
+                        }
+                    }
+
+                    Button(onClick = {
+                        if (needed.isEmpty()) onArm() else permissionLauncher.launch(needed.toTypedArray())
+                    }) { Text("Turn on streaming") }
+
+                    if (denied) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "Streaming needs Bluetooth permission. You can grant it in " +
+                                "Android's app settings and try again. Scanning over NFC is " +
+                                "unaffected.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                return@Column
+            }
+
+            val statusText = when (state) {
+                is StreamState.Listening -> "Connected"
+                is StreamState.Connecting -> "Waiting for the sensor to broadcast"
+                is StreamState.Disconnected -> "Not connected"
+                is StreamState.Failed -> state.reason
+            }
+            Text(statusText, style = MaterialTheme.typography.bodyMedium)
+
+            Text(
+                lastStreamedAt?.let { "Last reading received ${formatElapsed(it, now)}" }
+                    ?: "No reading received yet — the sensor broadcasts about once a minute.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Sensor at ${session.macAddress}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Keep the ongoing notification: Android stops collecting if it is dismissed. " +
+                    "Scanning over NFC keeps working regardless.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(onStop) { Text("Turn off streaming") }
         }
     }
 }

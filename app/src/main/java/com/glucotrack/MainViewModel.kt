@@ -13,6 +13,10 @@ import com.glucotrack.data.GlucoseReading
 import com.glucotrack.data.NutritionEntry
 import com.glucotrack.data.SensorRecord
 import com.glucotrack.data.SettingsStore
+import com.glucotrack.data.StreamingSession
+import com.glucotrack.data.StreamingStore
+import com.glucotrack.sensor.StreamingResult
+import com.glucotrack.streaming.StreamingService
 import com.glucotrack.data.Transfer
 import com.glucotrack.sensor.NfcSensorReader
 import com.glucotrack.sensor.ScanResult
@@ -52,10 +56,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = GlucoTrackRepository(GlucoTrackDatabase.get(app))
     private val settingsStore = SettingsStore(app)
+    private val streamingStore = StreamingStore(app)
     private val reader = NfcSensorReader()
 
     private val _scanStatus = MutableStateFlow<ScanStatus>(ScanStatus.Idle)
     val scanStatus: StateFlow<ScanStatus> = _scanStatus.asStateFlow()
+
+    /** Set when the next tap should switch on BLE streaming rather than take a reading. */
+    private val _armedToEnableStreaming = MutableStateFlow(false)
+    val armedToEnableStreaming: StateFlow<Boolean> = _armedToEnableStreaming.asStateFlow()
+
+    val streamingSession: StateFlow<StreamingSession?> = streamingStore.session
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val streamState = StreamingService.state
+    val lastStreamedAt = StreamingService.lastReadingAt
 
     /**
      * Whether the next tap should start an unstarted sensor rather than read it.
@@ -114,6 +129,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_scanStatus.value == ScanStatus.Reading) return
         viewModelScope.launch {
             _scanStatus.value = ScanStatus.Reading
+            if (_armedToEnableStreaming.value) {
+                _armedToEnableStreaming.value = false
+                enableStreamingFromTap(tag)
+                return@launch
+            }
+
             val activating = _armedToActivate.value
             val result = withContext(Dispatchers.IO) {
                 if (activating) reader.activate(tag) else reader.read(tag)
@@ -129,6 +150,49 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    fun armStreamingEnable() {
+        _armedToEnableStreaming.value = true
+    }
+
+    fun cancelStreamingEnable() {
+        _armedToEnableStreaming.value = false
+    }
+
+    /**
+     * Turns on streaming during an NFC tap and remembers what a later connection will need.
+     *
+     * The unlock code is generated once here. Re-running this replaces it, which is exactly why
+     * only one phone can stream: enabling it on a second device invalidates the first.
+     */
+    private suspend fun enableStreamingFromTap(tag: Tag) {
+        val code = java.security.SecureRandom().nextInt(Int.MAX_VALUE)
+        when (val result = withContext(Dispatchers.IO) { reader.enableStreaming(tag, code) }) {
+            is StreamingResult.Failure -> _scanStatus.value = ScanStatus.Error(result.reason)
+            is StreamingResult.Success -> {
+                streamingStore.save(
+                    StreamingSession(
+                        macAddress = result.macAddress,
+                        uid = result.uid,
+                        patchInfo = result.patchInfo,
+                        unlockCode = result.unlockCode,
+                        unlockCount = 0,
+                    )
+                )
+                _scanStatus.value = ScanStatus.Idle
+                StreamingService.start(getApplication())
+            }
+        }
+    }
+
+    fun stopStreaming() {
+        StreamingService.stop(getApplication())
+        viewModelScope.launch { streamingStore.clear() }
+    }
+
+    fun restartStreaming() {
+        StreamingService.start(getApplication())
     }
 
     fun armActivation() {

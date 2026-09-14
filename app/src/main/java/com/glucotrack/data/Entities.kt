@@ -45,7 +45,13 @@ data class NutritionEntry(
     val notes: String? = null,
 )
 
-/** A sensor this phone has scanned, so the app can show its age without a fresh tap. */
+/**
+ * A sensor this phone has scanned.
+ *
+ * The factory calibration is stored alongside, because a BLE packet carries raw counts and no
+ * calibration of its own: without these, a streamed reading cannot be turned into glucose. They
+ * are fixed at manufacture, so the values from any scan of this sensor are the right ones.
+ */
 @Entity(tableName = "sensors")
 data class SensorRecord(
     @PrimaryKey val serial: String,
@@ -53,4 +59,10 @@ data class SensorRecord(
     val maxLifeMinutes: Int,
     val lastScanAt: Long,
     val lastState: String,
+    val calI1: Int = 0,
+    val calI2: Int = 0,
+    val calI3: Int = 0,
+    val calI4: Int = 0,
+    val calI5: Int = 0,
+    val calI6: Int = 0,
 )

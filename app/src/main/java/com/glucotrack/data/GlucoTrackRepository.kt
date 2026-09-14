@@ -18,6 +18,26 @@ class GlucoTrackRepository(private val db: GlucoTrackDatabase) {
 
     fun currentSensor(): Flow<SensorRecord?> = db.sensorDao().mostRecent()
 
+    suspend fun currentSensorOnce(): SensorRecord? = db.sensorDao().allOnce().firstOrNull()
+
+    /** Stores readings recovered over BLE, keyed the same way as scanned ones. */
+    suspend fun saveBleReading(serial: String, reading: com.glucotrack.sensor.BleReading) {
+        val rows = (reading.history + reading.trend)
+            .filter { it.isValid }
+            .map {
+                GlucoseReading(
+                    sensorSerial = serial,
+                    minutesSinceStart = it.minutesSinceStart,
+                    timestamp = it.timestamp,
+                    mgdl = it.mgdl!!,
+                    fromTrend = true,
+                )
+            }
+            .associateBy { it.minutesSinceStart }
+            .values.toList()
+        if (rows.isNotEmpty()) db.glucoseDao().insertAll(rows)
+    }
+
     fun nutritionEntries(): Flow<List<NutritionEntry>> = db.nutritionDao().allEntries()
 
     suspend fun saveNutritionEntry(entry: NutritionEntry) {
@@ -70,6 +90,12 @@ class GlucoTrackRepository(private val db: GlucoTrackDatabase) {
                 maxLifeMinutes = scan.maxLifeMinutes,
                 lastScanAt = scan.scannedAt,
                 lastState = scan.state.name,
+                calI1 = scan.calibration.i1,
+                calI2 = scan.calibration.i2,
+                calI3 = scan.calibration.i3,
+                calI4 = scan.calibration.i4,
+                calI5 = scan.calibration.i5,
+                calI6 = scan.calibration.i6,
             )
         )
     }
