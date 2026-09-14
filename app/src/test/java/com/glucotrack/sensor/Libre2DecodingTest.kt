@@ -97,6 +97,38 @@ class Libre2DecodingTest {
     }
 
     @Test
+    fun `no reading is dated after the scan that produced it`() {
+        val scannedAt = 1_700_000_000_000L
+        val scan = parse(scannedAt)
+        (scan.trend + scan.history).forEach {
+            assertTrue(
+                "sample at ${it.minutesSinceStart} is dated after the scan",
+                it.timestamp <= scannedAt,
+            )
+        }
+    }
+
+    @Test
+    fun `the newest trend sample is newer than every history record`() {
+        // The current reading is whichever sample is newest, so a history record dated ahead of
+        // the live trend would surface a 15-minute-old value as the current one.
+        val scan = parseFixture()
+        val newestHistory = scan.history.maxOf { it.timestamp }
+        assertTrue(scan.trend[0].timestamp > newestHistory)
+    }
+
+    @Test
+    fun `timestamps agree with the sensor clock they were derived from`() {
+        val scan = parseFixture()
+        val all = scan.trend + scan.history
+        // Two samples one sensor-minute apart must be one wall-clock minute apart.
+        all.zipWithNext { a, b ->
+            val minutesApart = (a.minutesSinceStart - b.minutesSinceStart).toLong()
+            assertEquals(minutesApart * 60_000L, a.timestamp - b.timestamp)
+        }
+    }
+
+    @Test
     fun `current reading is the newest valid trend sample`() {
         val scan = parseFixture()
         assertNotNull(scan.current)

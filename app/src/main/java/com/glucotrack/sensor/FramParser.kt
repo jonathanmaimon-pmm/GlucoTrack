@@ -93,14 +93,8 @@ object FramParser {
             )
         }
 
-        // History records are written on a 15-minute boundary, offset by the FRAM write delay.
-        val preciseHistoryIndex = ((ageMinutes - FRAM_WRITE_DELAY_MINUTES) / 15) % HISTORY_RECORDS
+        // History records sit on a 15-minute boundary, offset by the FRAM write delay.
         val delay = (ageMinutes - FRAM_WRITE_DELAY_MINUTES) % 15 + FRAM_WRITE_DELAY_MINUTES
-        val historyAnchor = if (preciseHistoryIndex == historyIndex) {
-            scannedAt - delay * 60_000L
-        } else {
-            scannedAt - (delay - 15) * 60_000L
-        }
 
         val history = ArrayList<GlucoseSample>(HISTORY_RECORDS)
         for (i in 0 until HISTORY_RECORDS) {
@@ -113,7 +107,11 @@ object FramParser {
                 fram = fram,
                 offset = HISTORY_OFFSET + j * RECORD_SIZE,
                 minutesSinceStart = id,
-                timestamp = historyAnchor - i * 15 * 60_000L,
+                // Derived from the sensor's own clock, exactly as trend samples are. An earlier
+                // version anchored these to the scan time instead, which could place a history
+                // record in the future -- and since the current reading is whichever sample is
+                // newest, that let a 15-minute-old history value be shown as the live one.
+                timestamp = startedAt + id * 60_000L,
                 calibration = calibration,
             )
         }
