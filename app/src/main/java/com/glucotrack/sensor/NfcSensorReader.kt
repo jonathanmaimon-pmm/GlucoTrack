@@ -73,8 +73,8 @@ class NfcSensorReader {
             val patchInfo = readPatchInfo(nfcv, uid)
                 ?: return ScanResult.Failure("Couldn't read the sensor's ID block. Try again.")
 
-            val auth = Libre2Crypto.usefulFunction(uid, CMD_ACTIVATE, Libre2Crypto.SECRET)
-            val payload = byteArrayOf(CMD_ACTIVATE.toByte()) + auth
+            val auth = Libre2Crypto.usefulFunction(uid, Libre2Crypto.CMD_ACTIVATE, Libre2Crypto.SECRET)
+            val payload = byteArrayOf(Libre2Crypto.CMD_ACTIVATE.toByte()) + auth
             retrying { nfcv.transceive(abbottCommand(uid, payload)) }
                 ?: return ScanResult.Failure("The sensor refused the start command. Try again.")
 
@@ -82,6 +82,63 @@ class NfcSensorReader {
             read(tag)
         } catch (e: IOException) {
             ScanResult.Failure("Lost contact with the sensor during activation. Try again.")
+        } finally {
+            runCatching { nfcv.close() }
+        }
+    }
+
+    /**
+     * Switches on BLE streaming and returns the sensor's Bluetooth address.
+     *
+     * The sensor broadcasts a reading a minute once this is enabled, which removes both the
+     * tapping and the eight-hour deadline for collecting history. [unlockCode] is chosen by the
+     * caller and must be stored: every later BLE session has to present a payload derived from
+     * it, so losing it means the sensor cannot be reconnected to without enabling streaming
+     * again over NFC.
+     *
+     * Enabling streaming does not disturb NFC reading — a tap keeps working either way, which
+     * is what makes this safe to try on a sensor already in use.
+     */
+    fun enableStreaming(tag: Tag, unlockCode: Int): StreamingResult {
+        val nfcv = NfcV.get(tag) ?: return StreamingResult.Failure("That tag isn't a Libre sensor.")
+        return try {
+            nfcv.connect()
+            val uid = tag.id
+            if (uid.size != 8) return StreamingResult.Failure("Unexpected tag ID length (${uid.size}).")
+
+            val patchInfo = readPatchInfo(nfcv, uid)
+                ?: return StreamingResult.Failure("Couldn't read the sensor's ID block. Try again.")
+
+            val params = byteArrayOf(
+                (unlockCode and 0xFF).toByte(),
+                ((unlockCode ushr 8) and 0xFF).toByte(),
+                ((unlockCode ushr 16) and 0xFF).toByte(),
+                ((unlockCode ushr 24) and 0xFF).toByte(),
+            )
+            // This command authenticates against the patch info rather than the fixed secret.
+            val secret = (
+                ((patchInfo[4].toInt() and 0xFF) or ((patchInfo[5].toInt() and 0xFF) shl 8)) xor
+                    ((params[0].toInt() and 0xFF) or ((params[1].toInt() and 0xFF) shl 8))
+                ) and 0xFFFF
+            val auth = Libre2Crypto.usefulFunction(uid, Libre2Crypto.CMD_ENABLE_STREAMING, secret)
+            val payload = byteArrayOf(Libre2Crypto.CMD_ENABLE_STREAMING.toByte()) + params + auth
+
+            val reply = retrying { nfcv.transceive(abbottCommand(uid, payload)) }
+                ?: return StreamingResult.Failure("The sensor refused the streaming command. Try again.")
+
+            // Flags byte, then the six address bytes in reverse order.
+            if (reply.size != 7) {
+                return StreamingResult.Failure("The sensor didn't report a Bluetooth address.")
+            }
+            val address = reply.copyOfRange(1, 7).reversedArray()
+            StreamingResult.Success(
+                macAddress = address.joinToString(":") { "%02X".format(it) },
+                unlockCode = unlockCode,
+                patchInfo = patchInfo,
+                uid = uid,
+            )
+        } catch (e: IOException) {
+            StreamingResult.Failure("Lost contact with the sensor. Hold the phone still and try again.")
         } finally {
             runCatching { nfcv.close() }
         }
@@ -156,7 +213,6 @@ class NfcSensorReader {
         const val CMD_READ_MULTIPLE_BLOCKS: Byte = 0x23
         /** Abbott vendor-specific command; the sub-command travels in the payload. */
         const val CMD_ABBOTT: Byte = 0xA1.toByte()
-        const val CMD_ACTIVATE = 0x1B
 
         const val BLOCKS_PER_READ = 3
 

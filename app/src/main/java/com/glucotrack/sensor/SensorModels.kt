@@ -119,3 +119,37 @@ sealed interface ScanResult {
     /** [reason] is written for the person holding the phone, not for a log file. */
     data class Failure(val reason: String) : ScanResult
 }
+
+/** Outcome of asking a sensor to start broadcasting over BLE. */
+sealed interface StreamingResult {
+    /**
+     * Streaming is on. Every field here must be persisted: together they are the only way to
+     * derive the unlock payload each later BLE session needs.
+     */
+    data class Success(
+        val macAddress: String,
+        val unlockCode: Int,
+        val patchInfo: ByteArray,
+        val uid: ByteArray,
+    ) : StreamingResult {
+        // ByteArray uses identity equality, so a data class holding one needs these written out.
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (other !is Success) return false
+            return macAddress == other.macAddress &&
+                unlockCode == other.unlockCode &&
+                patchInfo.contentEquals(other.patchInfo) &&
+                uid.contentEquals(other.uid)
+        }
+
+        override fun hashCode(): Int {
+            var result = macAddress.hashCode()
+            result = 31 * result + unlockCode
+            result = 31 * result + patchInfo.contentHashCode()
+            result = 31 * result + uid.contentHashCode()
+            return result
+        }
+    }
+
+    data class Failure(val reason: String) : StreamingResult
+}

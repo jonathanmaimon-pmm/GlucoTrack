@@ -123,6 +123,102 @@ internal object Libre2Crypto {
     }
 
     /**
+     * Derives the 12-byte payload that unlocks a BLE streaming session.
+     *
+     * Written to the login characteristic straight after connecting. [enableTime] is the 32-bit
+     * code sent when streaming was switched on over NFC, and [unlockCount] increments once per
+     * session — the sensor rejects a payload it has already seen, so both must be persisted
+     * across app restarts or streaming stops working until the next NFC enable.
+     */
+    fun streamingUnlockPayload(
+        uid: ByteArray,
+        patchInfo: ByteArray,
+        enableTime: Int,
+        unlockCount: Int,
+    ): ByteArray {
+        val time = enableTime + unlockCount
+        val b = byteArrayOf(
+            (time and 0xFF).toByte(),
+            ((time ushr 8) and 0xFF).toByte(),
+            ((time ushr 16) and 0xFF).toByte(),
+            ((time ushr 24) and 0xFF).toByte(),
+        )
+
+        val ad = usefulFunction(uid, CMD_ACTIVATE, SECRET)
+        val ed = usefulFunction(uid, CMD_ENABLE_STREAMING, u16((enableTime and 0xFFFF) xor le16(patchInfo, 4)))
+
+        val t2 = processCrypto(
+            prepareVariables2(
+                uid,
+                u16(le16(ed, 0) xor le16(b, 2)),
+                le16(ad, 0),
+                u16(le16(ed, 2) xor le16(b, 0)),
+                le16(ad, 2),
+            )
+        )
+
+        val t31 = Crc16.compute(
+            byteArrayOf(
+                0xC1.toByte(), 0xC4.toByte(), 0xC3.toByte(), 0xC0.toByte(),
+                0xD4.toByte(), 0xE1.toByte(), 0xE7.toByte(), 0xBA.toByte(),
+                (t2[0] and 0xFF).toByte(), ((t2[0] ushr 8) and 0xFF).toByte(),
+            ),
+            0, 10,
+        )
+        val t32 = Crc16.compute(wordsToBytes(t2[1], t2[2], t2[3]), 0, 6)
+        val t33 = Crc16.compute(byteArrayOf(ad[0], ad[1], ad[2], ad[3], ed[0], ed[1]), 0, 6)
+        val t34 = Crc16.compute(byteArrayOf(ed[2], ed[3], b[0], b[1], b[2], b[3]), 0, 6)
+
+        val t4 = processCrypto(prepareVariables2(uid, t31, t32, t33, t34))
+        return b + wordsToBytes(t4[0], t4[1], t4[2], t4[3])
+    }
+
+    private fun wordsToBytes(vararg words: Int): ByteArray {
+        val out = ByteArray(words.size * 2)
+        words.forEachIndexed { i, w ->
+            out[i * 2] = (w and 0xFF).toByte()
+            out[i * 2 + 1] = ((w ushr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
+    /**
+     * Decrypts one 46-byte BLE notification into its 44-byte payload.
+     *
+     * The keystream depends on the sensor UID and on the packet's own two-byte header, so each
+     * packet is encrypted differently. The trailing CRC is verified here rather than by the
+     * caller: a corrupted packet must never reach the glucose parser, where it would decode into
+     * a plausible-looking reading.
+     *
+     * @return the decrypted payload, or null if the packet failed its checksum.
+     */
+    fun decryptBle(uid: ByteArray, data: ByteArray): ByteArray? {
+        if (data.size != BLE_PACKET_SIZE) return null
+
+        val d = usefulFunction(uid, CMD_ACTIVATE, SECRET)
+        val x = (le16(d, 0) xor le16(d, 2)) or 0x63
+        val y = le16(data, 0) xor 0x63
+
+        val keystream = ByteArray(64)
+        var k = processCrypto(prepareVariables(uid, x, y))
+        for (round in 0 until 8) {
+            for (w in 0 until 4) {
+                keystream[round * 8 + w * 2] = (k[w] and 0xFF).toByte()
+                keystream[round * 8 + w * 2 + 1] = ((k[w] ushr 8) and 0xFF).toByte()
+            }
+            k = processCrypto(k)
+        }
+
+        val out = ByteArray(BLE_PAYLOAD_SIZE)
+        for (i in 0 until BLE_PAYLOAD_SIZE) {
+            out[i] = (data[i + 2].toInt() xor keystream[i].toInt()).toByte()
+        }
+
+        val stored = (out[42].toInt() and 0xFF) or ((out[43].toInt() and 0xFF) shl 8)
+        return if (stored == Crc16.compute(out, 0, 42)) out else null
+    }
+
+    /**
      * True if [fram] looks like plaintext, judged by the header CRC.
      *
      * Libre 2 FRAM arrives encrypted, but a sensor unlocked over NFC (or a Libre 1) returns it in
@@ -136,4 +232,12 @@ internal object Libre2Crypto {
 
     const val BLOCK_COUNT = 43
     const val FRAM_SIZE = BLOCK_COUNT * 8
+
+    /** NFC sub-command numbers, needed here because they seed the streaming key derivation. */
+    const val CMD_ACTIVATE = 0x1B
+    const val CMD_ENABLE_STREAMING = 0x1E
+
+    /** A BLE notification carries a 2-byte header plus 44 encrypted bytes. */
+    const val BLE_PACKET_SIZE = 46
+    const val BLE_PAYLOAD_SIZE = 44
 }
