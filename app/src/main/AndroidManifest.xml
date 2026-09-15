@@ -11,6 +11,10 @@
     -->
     <uses-permission android:name="android.permission.NFC" />
 
+    <!-- Short vibrations confirming a scan happened, since the screen is usually not
+         visible while the phone is held against the sensor. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!--
       Bluetooth, for receiving the reading the sensor broadcasts each minute. Still no INTERNET
       permission: these reach the sensor on the wrist, not the network.

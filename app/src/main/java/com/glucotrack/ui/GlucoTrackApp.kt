@@ -52,6 +52,7 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
     val armedStreaming by viewModel.armedToEnableStreaming.collectAsStateWithLifecycle()
     val lastScan by viewModel.lastScan.collectAsStateWithLifecycle()
     val scanLog by viewModel.scanLog.collectAsStateWithLifecycle()
+    val sensorAlert by viewModel.sensorAlert.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = { TopAppBar(title = { Text("GlucoTrack") }) },
@@ -74,6 +75,7 @@ fun GlucoTrackApp(viewModel: MainViewModel) {
                 readings = recent,
                 sensor = sensor,
                 scanStatus = scanStatus,
+                sensorAlert = sensorAlert,
                 armedToActivate = armed,
                 targets = settings.targets,
                 unit = settings.unit,

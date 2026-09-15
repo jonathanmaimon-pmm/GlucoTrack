@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.glucotrack.ScanStatus
+import com.glucotrack.SensorAlert
 import com.glucotrack.analysis.GlucoseStatistics
 import com.glucotrack.analysis.GlucoseTargets
 import com.glucotrack.analysis.GlucoseUnit
@@ -35,6 +36,7 @@ fun NowScreen(
     readings: List<GlucoseReading>,
     sensor: SensorRecord?,
     scanStatus: ScanStatus,
+    sensorAlert: SensorAlert?,
     armedToActivate: Boolean,
     targets: GlucoseTargets,
     unit: GlucoseUnit,
@@ -50,6 +52,8 @@ fun NowScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        sensorAlert?.let { SensorAlertCard(it, now) }
+
         when {
             armedToActivate -> ActivationArmedCard(onCancelActivation)
             scanStatus is ScanStatus.Reading -> InfoCard("Reading sensor", "Keep the phone still.")
@@ -178,6 +182,57 @@ private fun CurrentReadingCard(
                         formatRate(it),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A sensor that has stopped, or reported a bad state.
+ *
+ * Placed above the reading because it changes what the reading means: the number below is not
+ * current glucose, it is whatever the sensor last managed to record.
+ */
+@Composable
+private fun SensorAlertCard(alert: SensorAlert, now: Long) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            when (alert) {
+                is SensorAlert.Stopped -> {
+                    Text(
+                        "This sensor has stopped recording",
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Its internal clock has not moved for " +
+                            formatElapsed(now - alert.stillSinceMillis, now).removeSuffix(" ago") +
+                            ", and still reads ${alert.ageMinutes} minutes since it was started. " +
+                            "It keeps answering scans, but it is returning the last reading it " +
+                            "managed to take rather than a current one.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "The glucose value below is not current. This sensor needs replacing.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                is SensorAlert.BadState -> {
+                    Text("Sensor reported a problem", style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "The sensor reports its state as ${alert.state}. Readings from it " +
+                            "should not be relied on, and it likely needs replacing.",
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }

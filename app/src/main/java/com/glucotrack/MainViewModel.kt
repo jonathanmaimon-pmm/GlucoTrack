@@ -52,6 +52,21 @@ data class ScanLogEntry(
     val mgdl: Double?,
 )
 
+/**
+ * A problem with the sensor itself, as opposed to with reading it.
+ *
+ * A sensor that has stopped keeps answering NFC perfectly: it returns the last data it wrote,
+ * every time, forever. Every surface-level signal looks healthy — the scan succeeds, a plausible
+ * glucose value appears, the timestamp says "just now" — and only the sensor's own clock gives it
+ * away by not advancing. Nothing else the app can see distinguishes this from stable glucose.
+ */
+sealed interface SensorAlert {
+    /** The sensor's internal clock has not moved between two scans minutes apart. */
+    data class Stopped(val ageMinutes: Int, val stillSinceMillis: Long) : SensorAlert
+    /** The sensor reported a failure, expiry or shutdown state. */
+    data class BadState(val state: SensorState) : SensorAlert
+}
+
 /** Outcome of an export or import, so the user is told what actually happened. */
 sealed interface TransferStatus {
     data object Idle : TransferStatus
@@ -75,6 +90,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsStore = SettingsStore(app)
     private val streamingStore = StreamingStore(app)
     private val reader = NfcSensorReader()
+    private val haptics = Haptics(app)
 
     /** True while a tap is being processed. Always cleared in a finally block. */
     private val scanInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -107,6 +123,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val _lastScan = MutableStateFlow<SensorScan?>(null)
     val lastScan: StateFlow<SensorScan?> = _lastScan.asStateFlow()
+
+    private val _sensorAlert = MutableStateFlow<SensorAlert?>(null)
+    val sensorAlert: StateFlow<SensorAlert?> = _sensorAlert.asStateFlow()
 
     /** The last few scans, newest first, for comparing one against the next. */
     private val _scanLog = MutableStateFlow<List<ScanLogEntry>>(emptyList())
@@ -169,6 +188,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 _scanStatus.value = ScanStatus.Reading
+                haptics.scanStarted()
 
                 if (_armedToEnableStreaming.value) {
                     _armedToEnableStreaming.value = false
@@ -185,7 +205,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _armedToActivate.value = false
 
                 _scanStatus.value = when (result) {
-                    is ScanResult.Failure -> ScanStatus.Error(result.reason)
+                    is ScanResult.Failure -> {
+                        haptics.scanFailed()
+                        ScanStatus.Error(result.reason)
+                    }
                     is ScanResult.Success -> {
                         _lastScan.value = result.scan
                         _scanLog.value = (
@@ -198,18 +221,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                             ) + _scanLog.value
                             ).take(6)
+                        _sensorAlert.value = detectSensorProblem(result.scan, _scanLog.value)
                         repository.saveScan(result.scan)
                         refresh.value = System.currentTimeMillis()
+                        haptics.scanSucceeded()
                         ScanStatus.Success(result.scan, System.currentTimeMillis())
                     }
                 }
             } catch (e: TimeoutCancellationException) {
+                haptics.scanFailed()
                 _scanStatus.value = ScanStatus.Error(
                     "The sensor didn't respond in time. Hold the phone still against it and try again."
                 )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                haptics.scanFailed()
                 // Anything unexpected is reported rather than swallowed. Silence here is what
                 // made the previous failure invisible.
                 _scanStatus.value = ScanStatus.Error(
@@ -221,6 +248,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 scanInFlight.set(false)
             }
         }
+    }
+
+    /**
+     * Decides whether the sensor itself has a problem.
+     *
+     * A stopped sensor is invisible from any single scan, so this compares the sensor's own clock
+     * across scans: real wall-clock time passing while the sensor clock stands still can only
+     * mean the sensor is no longer recording.
+     */
+    private fun detectSensorProblem(scan: SensorScan, log: List<ScanLogEntry>): SensorAlert? {
+        if (scan.state == SensorState.FAILURE ||
+            scan.state == SensorState.EXPIRED ||
+            scan.state == SensorState.SHUT_DOWN
+        ) {
+            return SensorAlert.BadState(scan.state)
+        }
+
+        // Compare against the oldest scan on record rather than the previous one, so that two
+        // taps a few seconds apart cannot raise a false alarm.
+        val oldest = log.lastOrNull() ?: return null
+        val wallMinutes = (scan.scannedAt - oldest.at) / 60_000L
+        val sensorMinutes = scan.ageMinutes - oldest.sensorAgeMinutes
+        if (wallMinutes >= STOPPED_SENSOR_MINUTES && sensorMinutes < wallMinutes / 2) {
+            return SensorAlert.Stopped(scan.ageMinutes, wallMinutes * 60_000L)
+        }
+        return null
+    }
+
+    fun dismissSensorAlert() {
+        _sensorAlert.value = null
     }
 
     fun armStreamingEnable() {
@@ -374,6 +431,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** A tag exchange that has not finished by now is not going to. */
         const val SCAN_TIMEOUT_MS = 20_000L
+        /**
+         * How long the sensor clock may lag wall time before the sensor is called stopped.
+         *
+         * Generous on purpose: a false alarm here would tell someone to replace a working sensor.
+         */
+        const val STOPPED_SENSOR_MINUTES = 20L
         const val HOUR_MILLIS = 60 * 60 * 1000L
         const val DAY_MILLIS = 24 * HOUR_MILLIS
     }
