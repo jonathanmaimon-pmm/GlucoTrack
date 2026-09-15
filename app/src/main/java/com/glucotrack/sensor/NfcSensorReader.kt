@@ -49,6 +49,8 @@ class NfcSensorReader {
             FramParser.parse(uid, patchInfo, fram, System.currentTimeMillis())
         } catch (e: IOException) {
             ScanResult.Failure("Lost contact with the sensor. Hold the phone still and try again.")
+        } catch (e: SecurityException) {
+            ScanResult.Failure("Lost contact with the sensor. Hold the phone still and try again.")
         } catch (e: IllegalArgumentException) {
             ScanResult.Failure(e.message ?: "The sensor returned data this app couldn't read.")
         } finally {
@@ -81,6 +83,8 @@ class NfcSensorReader {
             // Re-read so the caller sees the post-activation state rather than assuming success.
             read(tag)
         } catch (e: IOException) {
+            ScanResult.Failure("Lost contact with the sensor during activation. Try again.")
+        } catch (e: SecurityException) {
             ScanResult.Failure("Lost contact with the sensor during activation. Try again.")
         } finally {
             runCatching { nfcv.close() }
@@ -139,6 +143,8 @@ class NfcSensorReader {
             )
         } catch (e: IOException) {
             StreamingResult.Failure("Lost contact with the sensor. Hold the phone still and try again.")
+        } catch (e: SecurityException) {
+            StreamingResult.Failure("Lost contact with the sensor. Hold the phone still and try again.")
         } finally {
             runCatching { nfcv.close() }
         }
@@ -195,7 +201,12 @@ class NfcSensorReader {
         while (true) {
             try {
                 return exchange()
-            } catch (e: IOException) {
+            } catch (e: Exception) {
+                // IOException is the tag moving out of range mid-exchange. SecurityException is
+                // Android rejecting a tag handle it considers stale, which happens routinely
+                // when a handheld phone drifts off a sensor worn on an arm. Both mean "try
+                // again"; anything else is a real fault and is rethrown.
+                if (e !is IOException && e !is SecurityException) throw e
                 if (System.currentTimeMillis() > deadline) return null
                 try {
                     Thread.sleep(RETRY_PAUSE_MS)

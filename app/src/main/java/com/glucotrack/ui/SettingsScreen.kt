@@ -39,6 +39,7 @@ import com.glucotrack.TransferStatus
 import com.glucotrack.data.StreamingSession
 import com.glucotrack.sensor.StreamState
 import com.glucotrack.sensor.SensorScan
+import com.glucotrack.ScanLogEntry
 import androidx.compose.material3.Button
 import androidx.core.content.FileProvider
 import java.io.File
@@ -54,6 +55,7 @@ fun SettingsScreen(
     lastStreamedAt: Long?,
     armedToEnableStreaming: Boolean,
     lastScan: SensorScan?,
+    scanLog: List<ScanLogEntry>,
     now: Long,
     onUnitChange: (GlucoseUnit) -> Unit,
     onTargetsChange: (GlucoseTargets) -> Unit,
@@ -105,7 +107,7 @@ fun SettingsScreen(
 
         SharingCard(transferStatus, onExport, onImport, onDismissTransfer)
 
-        DiagnosticsCard(lastScan)
+        DiagnosticsCard(lastScan, scanLog, now)
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {
@@ -479,7 +481,7 @@ private fun StreamingCard(
  * Only populated after a scan in this session, since it is deliberately not stored.
  */
 @Composable
-private fun DiagnosticsCard(scan: SensorScan?) {
+private fun DiagnosticsCard(scan: SensorScan?, scanLog: List<ScanLogEntry>, now: Long) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text("Sensor diagnostics", style = MaterialTheme.typography.titleSmall)
@@ -525,6 +527,31 @@ private fun DiagnosticsCard(scan: SensorScan?) {
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 ),
             )
+            if (scanLog.size >= 2) {
+                Spacer(Modifier.height(10.dp))
+                Text("scan history:", style = MaterialTheme.typography.bodySmall)
+                val log = scanLog.zipWithNext().map { (newer, older) ->
+                    val wallMinutes = (newer.at - older.at) / 60_000L
+                    val sensorMinutes = newer.sensorAgeMinutes - older.sensorAgeMinutes
+                    "  +${wallMinutes}m elapsed -> sensor clock +${sensorMinutes}m, " +
+                        "raw ${older.rawValue}->${newer.rawValue}, " +
+                        "${older.mgdl?.toInt() ?: "-"}->${newer.mgdl?.toInt() ?: "-"} mg/dL"
+                }
+                Text(
+                    log.joinToString("\n"),
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    ),
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "If elapsed time advances but the sensor clock does not, the sensor has " +
+                        "stopped rather than the app.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
             Text(
                 "If a reading looks wrong, a photo of this is enough to check the calculation.",

@@ -22,7 +22,10 @@ import com.glucotrack.sensor.NfcSensorReader
 import com.glucotrack.sensor.ScanResult
 import com.glucotrack.sensor.SensorScan
 import com.glucotrack.sensor.SensorState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -34,6 +37,20 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/**
+ * One line of the scan log.
+ *
+ * Kept so consecutive scans can be compared. If the sensor's own clock does not advance between
+ * two scans minutes apart, the sensor has stopped rather than the app -- a distinction nothing
+ * else in the app can make.
+ */
+data class ScanLogEntry(
+    val at: Long,
+    val sensorAgeMinutes: Int,
+    val rawValue: Int,
+    val mgdl: Double?,
+)
 
 /** Outcome of an export or import, so the user is told what actually happened. */
 sealed interface TransferStatus {
@@ -58,6 +75,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val settingsStore = SettingsStore(app)
     private val streamingStore = StreamingStore(app)
     private val reader = NfcSensorReader()
+
+    /** True while a tap is being processed. Always cleared in a finally block. */
+    private val scanInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val _scanStatus = MutableStateFlow<ScanStatus>(ScanStatus.Idle)
     val scanStatus: StateFlow<ScanStatus> = _scanStatus.asStateFlow()
@@ -87,6 +107,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     private val _lastScan = MutableStateFlow<SensorScan?>(null)
     val lastScan: StateFlow<SensorScan?> = _lastScan.asStateFlow()
+
+    /** The last few scans, newest first, for comparing one against the next. */
+    private val _scanLog = MutableStateFlow<List<ScanLogEntry>>(emptyList())
+    val scanLog: StateFlow<List<ScanLogEntry>> = _scanLog.asStateFlow()
 
     private val _armedToActivate = MutableStateFlow(false)
     val armedToActivate: StateFlow<Boolean> = _armedToActivate.asStateFlow()
@@ -136,29 +160,65 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * holding the phone against the sensor — there is no button to find one-handed.
      */
     fun onTagDiscovered(tag: Tag) {
-        if (_scanStatus.value == ScanStatus.Reading) return
+        // Guards against a second tap landing while one is in flight. It must never be able to
+        // stay set: an earlier version left it set whenever anything threw, and because every
+        // later tap returned here, the app went on showing the last reading it had managed to
+        // take -- indefinitely, and with no sign that scanning had stopped working.
+        if (!scanInFlight.compareAndSet(false, true)) return
+
         viewModelScope.launch {
-            _scanStatus.value = ScanStatus.Reading
-            if (_armedToEnableStreaming.value) {
-                _armedToEnableStreaming.value = false
-                enableStreamingFromTap(tag)
-                return@launch
-            }
+            try {
+                _scanStatus.value = ScanStatus.Reading
 
-            val activating = _armedToActivate.value
-            val result = withContext(Dispatchers.IO) {
-                if (activating) reader.activate(tag) else reader.read(tag)
-            }
-            _armedToActivate.value = false
-
-            _scanStatus.value = when (result) {
-                is ScanResult.Failure -> ScanStatus.Error(result.reason)
-                is ScanResult.Success -> {
-                    _lastScan.value = result.scan
-                    repository.saveScan(result.scan)
-                    refresh.value = System.currentTimeMillis()
-                    ScanStatus.Success(result.scan, System.currentTimeMillis())
+                if (_armedToEnableStreaming.value) {
+                    _armedToEnableStreaming.value = false
+                    enableStreamingFromTap(tag)
+                    return@launch
                 }
+
+                val activating = _armedToActivate.value
+                val result = withTimeout(SCAN_TIMEOUT_MS) {
+                    withContext(Dispatchers.IO) {
+                        if (activating) reader.activate(tag) else reader.read(tag)
+                    }
+                }
+                _armedToActivate.value = false
+
+                _scanStatus.value = when (result) {
+                    is ScanResult.Failure -> ScanStatus.Error(result.reason)
+                    is ScanResult.Success -> {
+                        _lastScan.value = result.scan
+                        _scanLog.value = (
+                            listOf(
+                                ScanLogEntry(
+                                    at = result.scan.scannedAt,
+                                    sensorAgeMinutes = result.scan.ageMinutes,
+                                    rawValue = result.scan.trend.firstOrNull()?.rawValue ?: 0,
+                                    mgdl = result.scan.current?.mgdl,
+                                )
+                            ) + _scanLog.value
+                            ).take(6)
+                        repository.saveScan(result.scan)
+                        refresh.value = System.currentTimeMillis()
+                        ScanStatus.Success(result.scan, System.currentTimeMillis())
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                _scanStatus.value = ScanStatus.Error(
+                    "The sensor didn't respond in time. Hold the phone still against it and try again."
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                // Anything unexpected is reported rather than swallowed. Silence here is what
+                // made the previous failure invisible.
+                _scanStatus.value = ScanStatus.Error(
+                    "Scan failed: ${e.javaClass.simpleName}${e.message?.let { ": $it" } ?: ""}"
+                )
+            } finally {
+                _armedToActivate.value = false
+                _armedToEnableStreaming.value = false
+                scanInFlight.set(false)
             }
         }
     }
@@ -312,6 +372,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private companion object {
+        /** A tag exchange that has not finished by now is not going to. */
+        const val SCAN_TIMEOUT_MS = 20_000L
         const val HOUR_MILLIS = 60 * 60 * 1000L
         const val DAY_MILLIS = 24 * HOUR_MILLIS
     }

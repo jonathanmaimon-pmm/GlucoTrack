@@ -118,49 +118,75 @@ private fun CurrentReadingCard(
             }
 
             val band = targets.classify(latest.mgdl)
-            val stale = now - latest.timestamp > 20 * 60 * 1000L
+            // Past this, the number describes the past rather than the present. "In target
+            // range" is a claim about right now, and a reading this old cannot support it.
+            val stale = now - latest.timestamp > STALE_AFTER_MILLIS
 
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(
                     unit.format(latest.mgdl),
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Light,
-                    color = BandColors.of(band),
+                    // A stale value is drawn in muted grey, never in a band colour: colour here
+                    // reads as a verdict on how things are, and that is exactly what an old
+                    // reading cannot tell you.
+                    color = if (stale) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        BandColors.of(band)
+                    },
                 )
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.padding(bottom = 12.dp)) {
                     Text(unit.label, style = MaterialTheme.typography.bodyMedium)
-                    // Rate is computed from the stored trace, so it survives app restarts.
-                    val rate = recentRate(readings, latest.timestamp)
-                    Text(
-                        trendArrow(rate),
-                        style = MaterialTheme.typography.titleLarge,
-                    )
+                    if (!stale) {
+                        // Rate comes from the stored trace, so it survives app restarts.
+                        Text(
+                            trendArrow(recentRate(readings, latest.timestamp)),
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                    }
                 }
             }
 
-            Text(
-                bandLabel(band),
-                style = MaterialTheme.typography.titleMedium,
-                color = BandColors.of(band),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                formatElapsed(latest.timestamp, now) +
-                    if (stale) " — scan again for a current reading" else "",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            recentRate(readings, latest.timestamp)?.let {
+            if (stale) {
                 Text(
-                    formatRate(it),
+                    "Out of date",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BandColors.high,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "This reading is from ${formatElapsed(latest.timestamp, now)}. " +
+                        "Hold the phone against the sensor for a current one.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            } else {
+                Text(
+                    bandLabel(band),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = BandColors.of(band),
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    formatElapsed(latest.timestamp, now),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                recentRate(readings, latest.timestamp)?.let {
+                    Text(
+                        formatRate(it),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
     }
 }
+
+/** How old a reading may be before it stops being presented as the current value. */
+private const val STALE_AFTER_MILLIS = 15 * 60 * 1000L
 
 /** Least-squares slope over the 20 minutes before [at], in mg/dL per minute. */
 private fun recentRate(readings: List<GlucoseReading>, at: Long): Double? {
